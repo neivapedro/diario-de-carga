@@ -174,12 +174,14 @@ button:disabled { opacity: .3; cursor: default; }
 .idx li { border-bottom: 1px solid var(--line); }
 .idx-item {
   width: 100%;
-  display: grid; grid-template-columns: 64px 1fr auto; align-items: center; gap: 14px;
+  display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; align-items: center; gap: 14px;
   padding: 16px 0;
   background: none; border: 0; text-align: left;
 }
 .idx-item:active { background: rgba(255,255,255,.03); }
 .idx-code {
+  max-width: 40vw;
+  overflow-wrap: anywhere;
   font: 800 54px/.8 var(--f-display);
   text-align: center;
 }
@@ -191,6 +193,8 @@ button:disabled { opacity: .3; cursor: default; }
 /* treino */
 .treino { padding-bottom: calc(110px + env(safe-area-inset-bottom, 0px)); }
 .treino-cab { display: flex; align-items: center; gap: 16px; }
+.idx-code.longo { font-size: 26px; line-height: .95; }
+.treino-code.longo { font-size: 28px; }
 .treino-code {
   flex: none;
   display: grid; place-items: center;

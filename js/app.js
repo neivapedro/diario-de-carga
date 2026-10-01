@@ -221,7 +221,7 @@ function renderIndice() {
     ].filter(Boolean).join(' · ');
     return `
       <li><button class="idx-item" data-action="open" data-id="${w.id}">
-        <span class="idx-code">${esc(w.code)}</span>
+        <span class="idx-code${w.code.length > 2 ? ' longo' : ''}">${esc(w.code)}</span>
         <span class="idx-txt"><span class="idx-nome">${esc(w.name || 'Treino ' + w.code)}</span><span class="idx-meta">${meta}</span></span>
         <span class="idx-seta" aria-hidden="true">›</span>
       </button></li>`;
@@ -310,7 +310,7 @@ function renderTreino(w) {
         <button class="link" data-action="toggle-edit">${editMode ? 'Concluir' : 'Editar ficha'}</button>
       </header>
       <div class="treino-cab">
-        <span class="treino-code">${esc(w.code)}</span>
+        <span class="treino-code${w.code.length > 2 ? ' longo' : ''}">${esc(w.code)}</span>
         <div class="treino-txt">
           <h1>${esc(w.name || 'Treino ' + w.code)}</h1>
           <span class="idx-meta">${all.length} ${all.length === 1 ? 'sessão registrada' : 'sessões registradas'}</span>
@@ -580,4 +580,13 @@ render();
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
+  // versão nova publicada: recarrega uma vez para já usar a atualização
+  if (navigator.serviceWorker.controller) {
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloaded) return;
+      reloaded = true;
+      location.reload();
+    });
+  }
 }
