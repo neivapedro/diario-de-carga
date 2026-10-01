@@ -1,4 +1,6 @@
 import { store, uid } from './store.js';
+import { sb, track, adopt, resetLocal, syncNow, onStatus, getStatus, pendingCount } from './sync.js';
+import { SITE_URL } from './config.js';
 
 const app = document.getElementById('app');
 const toastEl = document.getElementById('toast');
@@ -7,6 +9,7 @@ let state = store.load();
 let draft = null;      // sessão sendo preenchida (nova ou em edição)
 let draftFor = null;   // id do treino dono do rascunho
 let editMode = false;  // modo de edição da ficha (renomear/ordenar/remover exercícios)
+let user = null;       // conta conectada
 
 /* ---------- utilidades ---------- */
 
@@ -40,7 +43,51 @@ function toast(msg) {
 
 function commit() {
   if (!store.save(state)) toast('Não foi possível salvar no aparelho. Verifique o espaço livre.');
+  track(state);
+  paintStatus();
+  clearTimeout(commit.t);
+  commit.t = setTimeout(sync, 800);
 }
+
+function sync() {
+  if (!user) return;
+  syncNow(state, () => {
+    store.save(state);
+    // não redesenha enquanto a pessoa digita ou tem uma janela aberta
+    if (app.contains(document.activeElement) && document.activeElement.matches('input')) return;
+    if (document.querySelector('.sheet-wrap')) return;
+    render({ keepScroll: true });
+  });
+}
+
+const STATUS_TXT = {
+  ok: 'Sincronizado',
+  syncing: 'Sincronizando',
+  offline: 'Sem internet',
+  error: 'Falha ao sincronizar',
+};
+function statusText() {
+  const n = pendingCount();
+  const st = getStatus();
+  if (st === 'syncing') return STATUS_TXT.syncing;
+  if (n && st !== 'error') return `${n} ${n === 1 ? 'pendente' : 'pendentes'}`;
+  return STATUS_TXT[st] || STATUS_TXT.ok;
+}
+function statusKind() {
+  const st = getStatus();
+  if (st === 'error') return 'erro';
+  if (st === 'offline' || pendingCount()) return 'pend';
+  return 'ok';
+}
+function paintStatus() {
+  const el = document.getElementById('sync');
+  if (!el) return;
+  el.dataset.s = statusKind();
+  el.querySelector('.sync-txt').textContent = statusText();
+}
+onStatus(paintStatus);
+
+const userName = () => user?.user_metadata?.name || user?.email?.split('@')[0] || '';
 
 const getWorkout = (id) => state.workouts.find((w) => w.id === id);
 const sessionsOf = (wid) => state.sessions
@@ -69,7 +116,7 @@ function sheet({ title, text = '', html = '', actions, onMount }) {
       </form>`;
     document.body.append(wrap);
     const form = wrap.querySelector('form');
-    const values = () => Object.fromEntries([...form.querySelectorAll('[name]')].map((i) => [i.name, i.value.trim()]));
+    const values = () => Object.fromEntries([...form.querySelectorAll('[name]')].map((i) => [i.name, i.type === 'password' ? i.value : i.value.trim()]));
     const close = (v) => { wrap.remove(); resolve(v); };
     const primary = actions.find((a) => a.primary);
     form.addEventListener('submit', (e) => { e.preventDefault(); if (primary) close({ action: primary.value, ...values() }); });
@@ -205,8 +252,13 @@ function renderCapa() {
         <h1>Diário<br>de Carga</h1>
         <span class="etiqueta-sub">repetições × peso</span>
       </div>
-      <div class="dono"><span>Pertence a</span><span class="linha"></span></div>
-      <button class="btn abrir" data-action="abrir">Abrir</button>
+      <div class="dono"><span>Pertence a</span><span class="linha">${esc(userName())}</span></div>
+      ${user ? `
+      <button class="btn abrir" data-action="abrir">Abrir</button>` : `
+      <div class="capa-acoes">
+        <button class="btn abrir" data-action="entrar">Entrar</button>
+        <button class="link" data-action="criar-conta">Criar conta</button>
+      </div>`}
     </section>`;
 }
 
@@ -231,7 +283,9 @@ function renderIndice() {
     <section class="pagina">
       <header class="topo">
         <button class="link" data-action="capa">‹ Capa</button>
-        <span class="eyebrow">Índice</span>
+        <button class="sync" id="sync" data-action="conta" data-s="${statusKind()}" aria-label="Conta e sincronização">
+          <span class="sync-dot" aria-hidden="true"></span><span class="sync-txt">${statusText()}</span>
+        </button>
       </header>
       <h1 class="titulo">Diário de Carga</h1>
       ${state.workouts.length ? `<ol class="idx">${rows}</ol>` : `
@@ -357,6 +411,7 @@ function renderTreino(w) {
 /* ---------- roteamento ---------- */
 
 function route() {
+  if (!user) return { name: 'capa' };
   const h = location.hash.replace(/^#/, '');
   if (h.startsWith('t/')) {
     const w = getWorkout(h.slice(2));
@@ -398,6 +453,9 @@ window.addEventListener('hashchange', () => { editMode = false; render(); });
 
 const actions = {
   abrir: () => go('indice'),
+  entrar: () => loginFlow(),
+  'criar-conta': () => signupFlow(),
+  conta: () => accountFlow(),
   capa: () => go(''),
   indice: () => go('indice'),
   open: (el) => go('t/' + el.dataset.id),
@@ -576,7 +634,184 @@ app.addEventListener('keydown', (e) => {
   inputs[inputs.indexOf(e.target) + 1]?.focus();
 });
 
+/* ---------- conta ---------- */
+
+const AUTH_ERR = [
+  [/invalid login credentials/i, 'E-mail ou senha incorretos.'],
+  [/email not confirmed/i, 'Confirme seu e-mail antes de entrar. Procure a mensagem do Supabase na caixa de entrada e no spam.'],
+  [/already registered|already been registered/i, 'Este e-mail já tem conta. Use Entrar.'],
+  [/password should be at least|weak password/i, 'A senha precisa ter pelo menos 6 caracteres.'],
+  [/rate limit|too many/i, 'Muitas tentativas seguidas. Aguarde alguns minutos e tente de novo.'],
+  [/unable to validate email|invalid email|email address .* is invalid/i, 'Esse e-mail não parece válido. Confira o endereço.'],
+  [/failed to fetch|network|load failed/i, 'Sem internet. Para entrar ou criar conta é preciso estar conectado.'],
+];
+const authMsg = (e) => (AUTH_ERR.find(([re]) => re.test(e?.message || '')) || [, 'Algo deu errado: ' + (e?.message || 'erro desconhecido')])[1];
+
+const fieldsLogin = (email = '') => `
+  <label class="field"><span>E-mail</span>
+    <input name="email" type="email" autocomplete="username" inputmode="email" autocapitalize="off" value="${esc(email)}"></label>
+  <label class="field"><span>Senha</span>
+    <input name="password" type="password" autocomplete="current-password"></label>`;
+
+async function loginFlow(email = '') {
+  const r = await sheet({
+    title: 'Entrar',
+    html: fieldsLogin(email),
+    actions: [
+      { label: 'Esqueci a senha', value: 'forgot' },
+      { label: 'Entrar', value: 'ok', kind: 'forte', primary: true },
+    ],
+  });
+  if (!r) return;
+  if (r.action === 'forgot') return forgotFlow(r.email);
+  if (!r.email || !r.password) { toast('Preencha e-mail e senha.'); return loginFlow(r.email); }
+  toast('Entrando...');
+  const { error } = await sb.auth.signInWithPassword({ email: r.email, password: r.password });
+  if (error) { toast(authMsg(error)); return loginFlow(r.email); }
+}
+
+async function signupFlow() {
+  const r = await sheet({
+    title: 'Criar conta',
+    html: `
+      <label class="field"><span>Seu nome</span>
+        <input name="name" autocomplete="name" maxlength="40"></label>
+      <label class="field"><span>E-mail</span>
+        <input name="email" type="email" autocomplete="username" inputmode="email" autocapitalize="off"></label>
+      <label class="field"><span>Senha (mínimo 6 caracteres)</span>
+        <input name="password" type="password" autocomplete="new-password" minlength="6"></label>`,
+    actions: [
+      { label: 'Cancelar', value: 'cancel' },
+      { label: 'Criar conta', value: 'ok', kind: 'forte', primary: true },
+    ],
+  });
+  if (r?.action !== 'ok') return;
+  if (!r.email || r.password.length < 6) { toast('Preencha o e-mail e uma senha com pelo menos 6 caracteres.'); return signupFlow(); }
+  toast('Criando conta...');
+  const { data, error } = await sb.auth.signUp({
+    email: r.email,
+    password: r.password,
+    options: { data: { name: r.name }, emailRedirectTo: SITE_URL },
+  });
+  if (error) return toast(authMsg(error));
+  if (data.session) return; // confirmação de e-mail desligada: já entrou
+  await sheet({
+    title: 'Confirme seu e-mail',
+    text: `Enviamos um link para ${r.email}. Toque nele para ativar a conta (veja também o spam). Depois volte ao app e toque em Entrar.`,
+    actions: [{ label: 'Entendi', value: 'ok', kind: 'forte', primary: true }],
+  });
+}
+
+async function forgotFlow(email = '') {
+  const r = await sheet({
+    title: 'Recuperar senha',
+    text: 'Enviaremos um link para você criar uma senha nova.',
+    html: `<label class="field"><span>E-mail</span>
+      <input name="email" type="email" autocomplete="username" inputmode="email" autocapitalize="off" value="${esc(email)}"></label>`,
+    actions: [
+      { label: 'Cancelar', value: 'cancel' },
+      { label: 'Enviar link', value: 'ok', kind: 'forte', primary: true },
+    ],
+  });
+  if (r?.action !== 'ok' || !r.email) return;
+  const { error } = await sb.auth.resetPasswordForEmail(r.email, { redirectTo: SITE_URL });
+  toast(error ? authMsg(error) : 'Link enviado. Confira seu e-mail.');
+}
+
+async function newPasswordFlow() {
+  const r = await sheet({
+    title: 'Nova senha',
+    html: `<label class="field"><span>Nova senha (mínimo 6 caracteres)</span>
+      <input name="password" type="password" autocomplete="new-password" minlength="6"></label>`,
+    actions: [{ label: 'Salvar senha', value: 'ok', kind: 'forte', primary: true }],
+  });
+  if (!r?.password || r.password.length < 6) return newPasswordFlow();
+  const { error } = await sb.auth.updateUser({ password: r.password });
+  toast(error ? authMsg(error) : 'Senha alterada.');
+}
+
+async function accountFlow() {
+  const n = pendingCount();
+  const r = await sheet({
+    title: userName() || 'Conta',
+    text: `${user.email} · ${statusText()}${n ? '. As alterações pendentes sobem sozinhas quando houver internet.' : ''}`,
+    actions: [
+      { label: 'Sair', value: 'logout', kind: 'danger' },
+      { label: 'Sincronizar', value: 'sync' },
+      { label: 'Fechar', value: 'close', primary: true },
+    ],
+  });
+  if (r?.action === 'sync') {
+    if (!navigator.onLine) return toast('Sem internet no momento.');
+    sync();
+  } else if (r?.action === 'logout') {
+    if (pendingCount()) {
+      const ok = await confirmSheet(
+        'Sair com alterações pendentes?',
+        `${pendingCount()} ${pendingCount() === 1 ? 'alteração ainda não foi enviada' : 'alterações ainda não foram enviadas'} para a conta. Se sair agora, elas serão perdidas.`,
+        'Sair mesmo assim');
+      if (!ok) return;
+    }
+    logout();
+  }
+}
+
+async function logout() {
+  await sb.auth.signOut({ scope: 'local' }).catch(() => {});
+  clearDevice();
+  user = null;
+  go('');
+}
+
+// apaga do aparelho os dados da conta (eles continuam salvos na nuvem)
+function clearDevice() {
+  for (const w of state.workouts) store.clearDraft(w.id);
+  state = { workouts: [], sessions: [], names: [] };
+  store.save(state);
+  resetLocal();
+  draft = null; draftFor = null;
+}
+
+function onSignedIn(u) {
+  const first = !user;
+  user = u;
+  if (!adopt(u.id, state)) {
+    // este aparelho tinha dados de outra conta: troca pelos da conta atual
+    clearDevice();
+    adopt(u.id, state);
+  }
+  if (first) {
+    if (route().name === 'capa' && location.hash !== '#indice') go('indice');
+    else render({ keepScroll: true });
+  }
+  sync();
+}
+
+sb.auth.onAuthStateChange((event, session) => {
+  // o Supabase pede para não chamar outras funções dele dentro deste aviso
+  setTimeout(() => {
+    if (event === 'PASSWORD_RECOVERY') { if (session?.user) onSignedIn(session.user); newPasswordFlow(); return; }
+    if (session?.user) {
+      if (!user || user.id !== session.user.id) onSignedIn(session.user);
+      else user = session.user;
+    } else if (event === 'SIGNED_OUT' && user) {
+      user = null;
+      render();
+    }
+  }, 0);
+});
+
+window.addEventListener('online', sync);
+window.addEventListener('offline', () => { syncNow(state, () => {}); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync(); });
+
+try {
+  const { data } = await sb.auth.getSession();
+  user = data.session?.user ?? null;
+} catch {}
+if (location.hash.includes('access_token') || location.hash.includes('error_description')) history.replaceState(null, '', location.pathname);
 render();
+if (user) { adopt(user.id, state) || (clearDevice(), adopt(user.id, state)); sync(); }
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});

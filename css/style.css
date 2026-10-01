@@ -138,7 +138,33 @@ button:disabled { opacity: .3; cursor: default; }
   letter-spacing: .14em; text-transform: uppercase;
   color: var(--dust);
 }
-.dono .linha { flex: 1; border-bottom: 1px solid var(--line-2); height: 1px; }
+.dono .linha {
+  flex: 1; min-width: 0;
+  padding: 0 0 4px 4px;
+  border-bottom: 1px solid var(--line-2);
+  font: 600 20px/1 var(--f-display);
+  letter-spacing: .06em;
+  color: var(--chalk);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.capa-acoes { display: grid; gap: 6px; justify-items: center; }
+.capa-acoes .link { padding: 12px 20px; font-size: 16px; letter-spacing: .14em; text-transform: uppercase; }
+
+.sync {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 36px; padding: 0 12px;
+  background: rgba(10, 10, 9, .4);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  font: 500 13px/1 var(--f-body);
+  letter-spacing: .08em; text-transform: uppercase;
+  color: var(--dust);
+}
+.sync-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dust); }
+.sync[data-s="ok"] .sync-dot { background: var(--chalk); }
+.sync[data-s="pend"] .sync-dot { background: transparent; border: 1px solid var(--dust); }
+.sync[data-s="erro"] { color: var(--oxide); }
+.sync[data-s="erro"] .sync-dot { background: var(--oxide); }
 .abrir { width: 100%; min-height: 56px; font-size: 22px; letter-spacing: .3em; }
 
 /* ---------- páginas ---------- */
