@@ -251,7 +251,7 @@ button:disabled { opacity: .3; cursor: default; }
   box-shadow: -10px 0 14px -8px rgba(0,0,0,.7);
 }
 .grade thead th { border-bottom-color: var(--line-2); }
-.col { min-width: 84px; }
+.col { min-width: 112px; }
 .col-btn {
   width: 100%;
   display: grid; gap: 4px; justify-items: center;
@@ -284,7 +284,9 @@ button:disabled { opacity: .3; cursor: default; }
   white-space: nowrap;
   font: 400 15px/1 var(--f-data);
 }
-.x { color: var(--dust); padding: 0 1px; }
+.x { color: var(--dust); padding: 0 6px; }
+.par .x { padding: 0 1px; }
+.u { color: var(--dust); font-size: 11px; margin-left: 2px; letter-spacing: .02em; }
 .nada { color: var(--line-2); }
 
 .ex-head th {

@@ -203,7 +203,7 @@ function renderCapa() {
       <div class="etiqueta">
         <span class="eyebrow">Registro de séries</span>
         <h1>Diário<br>de Carga</h1>
-        <span class="etiqueta-sub">peso × repetições</span>
+        <span class="etiqueta-sub">repetições × peso</span>
       </div>
       <div class="dono"><span>Pertence a</span><span class="linha"></span></div>
       <button class="btn abrir" data-action="abrir">Abrir</button>
@@ -276,16 +276,16 @@ function renderTreino(w) {
       const cells = past.map((s) => {
         const set = s.entries[e.id]?.sets[i];
         if (!set || (set.w == null && set.r == null)) return '<td class="v"><span class="nada">—</span></td>';
-        const wTxt = set.w != null ? fmtNum(set.w) : '';
-        const rTxt = set.r != null ? `<span class="x">×</span>${fmtNum(set.r)}` : '';
-        return `<td class="v">${wTxt}${wTxt && rTxt ? ' ' : ''}${rTxt}</td>`;
+        const rTxt = set.r != null ? `${fmtNum(set.r)}<span class="u">rep</span>` : '';
+        const wTxt = set.w != null ? `${fmtNum(set.w)}<span class="u">kg</span>` : '';
+        return `<td class="v">${rTxt}${rTxt && wTxt ? '<span class="x">×</span>' : ''}${wTxt}</td>`;
       }).join('');
       const ds = de.sets[i];
       const now = ds ? `
         <div class="par">
-          <input class="in-w" data-ex="${e.id}" data-i="${i}" data-k="w" inputmode="decimal" enterkeyhint="next" placeholder="kg" aria-label="${esc(e.name)}, série ${i + 1}, peso em kg" value="${esc(ds.w)}">
-          <span class="x">×</span>
           <input class="in-r" data-ex="${e.id}" data-i="${i}" data-k="r" inputmode="numeric" enterkeyhint="next" placeholder="rep" aria-label="${esc(e.name)}, série ${i + 1}, repetições" value="${esc(ds.r)}">
+          <span class="x">×</span>
+          <input class="in-w" data-ex="${e.id}" data-i="${i}" data-k="w" inputmode="decimal" enterkeyhint="next" placeholder="kg" aria-label="${esc(e.name)}, série ${i + 1}, peso em kg" value="${esc(ds.w)}">
         </div>` : '';
       html += `<tr><th scope="row" class="lbl">Série ${i + 1}</th>${cells}<td class="now">${now}</td></tr>`;
     }

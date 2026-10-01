@@ -1,7 +1,7 @@
 # Diário de Carga
 
 Caderneta de treino de musculação: você monta suas fichas (A, B, C...) à mão
-e anota peso × repetições de cada série. Cada sessão vira uma coluna ao lado
+e anota repetições × peso de cada série. Cada sessão vira uma coluna ao lado
 das anteriores, para comparar com o que fez da última vez.
 
 App web instalável (PWA). No iPhone: abra o link no Safari,
