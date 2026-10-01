@@ -1,5 +1,5 @@
 // Funciona sem internet: guarda o app no aparelho e atualiza em segundo plano.
-const CACHE = 'diario-de-carga-v4';
+const CACHE = 'diario-de-carga-v5';
 const ASSETS = [
   './',
   './index.html',

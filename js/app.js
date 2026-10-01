@@ -254,7 +254,10 @@ function renderCapa() {
       </div>
       <div class="dono"><span>Pertence a</span><span class="linha">${esc(userName())}</span></div>
       ${user ? `
-      <button class="btn abrir" data-action="abrir">Abrir</button>` : `
+      <div class="capa-acoes">
+        <button class="btn abrir" data-action="abrir">Abrir</button>
+        <button class="link" data-action="sair">Sair</button>
+      </div>` : `
       <div class="capa-acoes">
         <button class="btn abrir" data-action="entrar">Entrar</button>
         <button class="link" data-action="criar-conta">Criar conta</button>
@@ -443,7 +446,7 @@ function render({ keepScroll = false } = {}) {
 }
 
 const go = (hash) => {
-  if (location.hash === '#' + hash) render();
+  if (location.hash.replace(/^#/, '') === hash) render();
   else location.hash = hash;
 };
 
@@ -456,6 +459,7 @@ const actions = {
   entrar: () => loginFlow(),
   'criar-conta': () => signupFlow(),
   conta: () => accountFlow(),
+  sair: () => logoutFlow(),
   capa: () => go(''),
   indice: () => go('indice'),
   open: (el) => go('t/' + el.dataset.id),
@@ -668,6 +672,7 @@ async function loginFlow(email = '') {
   toast('Entrando...');
   const { error } = await sb.auth.signInWithPassword({ email: r.email, password: r.password });
   if (error) { toast(authMsg(error)); return loginFlow(r.email); }
+  toastEl.hidden = true;
 }
 
 async function signupFlow() {
@@ -745,15 +750,22 @@ async function accountFlow() {
     if (!navigator.onLine) return toast('Sem internet no momento.');
     sync();
   } else if (r?.action === 'logout') {
-    if (pendingCount()) {
-      const ok = await confirmSheet(
-        'Sair com alterações pendentes?',
-        `${pendingCount()} ${pendingCount() === 1 ? 'alteração ainda não foi enviada' : 'alterações ainda não foram enviadas'} para a conta. Se sair agora, elas serão perdidas.`,
-        'Sair mesmo assim');
-      if (!ok) return;
-    }
-    logout();
+    logoutFlow();
   }
+}
+
+async function logoutFlow() {
+  const n = pendingCount();
+  const ok = n
+    ? await confirmSheet(
+      'Sair com alterações pendentes?',
+      `${n} ${n === 1 ? 'alteração ainda não foi enviada' : 'alterações ainda não foram enviadas'} para a conta. Se sair agora, ${n === 1 ? 'ela será perdida' : 'elas serão perdidas'}.`,
+      'Sair mesmo assim')
+    : await confirmSheet(
+      'Sair da conta?',
+      `Seus treinos continuam salvos na conta ${user.email}. Para vê-los de novo, é só entrar.`,
+      'Sair');
+  if (ok) logout();
 }
 
 async function logout() {
