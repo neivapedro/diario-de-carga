@@ -52,7 +52,8 @@ function commit() {
 function sync() {
   if (!user) return;
   syncNow(state, () => {
-    store.save(state);
+    if (mergeSameDay()) commit();
+    else store.save(state);
     // não redesenha enquanto a pessoa digita ou tem uma janela aberta
     if (app.contains(document.activeElement) && document.activeElement.matches('input')) return;
     if (document.querySelector('.sheet-wrap')) return;
@@ -93,6 +94,25 @@ const getWorkout = (id) => state.workouts.find((w) => w.id === id);
 const sessionsOf = (wid) => state.sessions
   .filter((s) => s.workoutId === wid)
   .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
+
+// Um treino tem uma única sessão por data: sessões do mesmo dia viram uma só.
+// Para cada exercício vale a anotação salva por último.
+function mergeSameDay() {
+  const byKey = new Map();
+  const drop = new Set();
+  const ordered = [...state.sessions].sort((a, b) => a.createdAt - b.createdAt);
+  for (const s of ordered) {
+    const key = s.workoutId + '|' + s.date;
+    const base = byKey.get(key);
+    if (!base) { byKey.set(key, s); continue; }
+    base.entries = { ...base.entries, ...s.entries };
+    if (s.note) base.note = base.note && base.note !== s.note ? `${base.note} · ${s.note}` : s.note;
+    drop.add(s.id);
+  }
+  if (!drop.size) return false;
+  state.sessions = state.sessions.filter((s) => !drop.has(s.id));
+  return true;
+}
 
 function rememberName(name) {
   if (!state.names.some((n) => norm(n) === norm(name))) state.names.push(name);
@@ -573,13 +593,15 @@ const actions = {
       const s = state.sessions.find((x) => x.id === draft.editing);
       // mantém anotações de exercícios que saíram da ficha
       const kept = Object.fromEntries(Object.entries(s.entries).filter(([id]) => !w.exercises.some((e) => e.id === id)));
-      Object.assign(s, { date: draft.date, note: draft.note.trim(), entries: { ...kept, ...entries } });
+      Object.assign(s, { date: draft.date, note: draft.note.trim(), entries: { ...kept, ...entries }, createdAt: Date.now() });
+      mergeSameDay();
       commit();
       loadNewDraft(w);
       render();
       toast('Alterações salvas');
     } else {
       state.sessions.push({ id: uid(), workoutId: w.id, date: draft.date, note: draft.note.trim(), entries, createdAt: Date.now() });
+      mergeSameDay();
       commit();
       store.clearDraft(w.id);
       draft = null;
@@ -822,6 +844,7 @@ try {
   user = data.session?.user ?? null;
 } catch {}
 if (location.hash.includes('access_token') || location.hash.includes('error_description')) history.replaceState(null, '', location.pathname);
+if (mergeSameDay()) commit();
 render();
 if (user) { adopt(user.id, state) || (clearDevice(), adopt(user.id, state)); sync(); }
 
