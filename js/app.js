@@ -338,6 +338,15 @@ function renderIndice() {
 
   app.innerHTML = `
     <section class="pagina">
+      ${pageHeader('treinos')}
+      ${state.workouts.length ? `<ol class="idx">${rows}</ol>` : `
+        <p class="vazio">Seu diário está em branco. Crie o primeiro treino do jeito que você divide: só A, AB, ABC, ABCDE...</p>`}
+      <button class="btn add" data-action="new-workout">+ Novo treino</button>
+    </section>`;
+}
+
+function pageHeader(tab) {
+  return `
       <header class="topo">
         <button class="link" data-action="capa">‹ Capa</button>
         <button class="sync" id="sync" data-action="conta" data-s="${statusKind()}" aria-label="Conta e sincronização">
@@ -345,10 +354,195 @@ function renderIndice() {
         </button>
       </header>
       <h1 class="titulo">Diário de Carga</h1>
-      ${state.workouts.length ? `<ol class="idx">${rows}</ol>` : `
-        <p class="vazio">Seu diário está em branco. Crie o primeiro treino do jeito que você divide: só A, AB, ABC, ABCDE...</p>`}
-      <button class="btn add" data-action="new-workout">+ Novo treino</button>
+      <nav class="abas" aria-label="Seções">
+        <button class="aba" data-action="indice" aria-current="${tab === 'treinos' ? 'page' : 'false'}">Treinos</button>
+        <button class="aba" data-action="evolucao" aria-current="${tab === 'evolucao' ? 'page' : 'false'}">Evolução</button>
+      </nav>`;
+}
+
+/* ---------- evolução de carga ---------- */
+
+const EVO_KEY = 'diario-de-carga:evolucao';
+let evo = (() => { try { return { ex: '', per: 'mes', ...JSON.parse(localStorage.getItem(EVO_KEY) || '{}') }; } catch { return { ex: '', per: 'mes' }; } })();
+const saveEvo = () => { try { localStorage.setItem(EVO_KEY, JSON.stringify(evo)); } catch {} };
+
+const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const kg = (n) => fmtNum(Math.round(n * 10) / 10);
+const pct = (n) => fmtNum(Math.round(n * 10) / 10);
+const signed = (n, f) => (n > 0 ? '+' : n < 0 ? '−' : '') + f(Math.abs(n));
+
+// maior peso de cada exercício (pelo nome) em cada data
+function weightHistory() {
+  const nameOf = new Map();
+  for (const w of state.workouts) for (const e of w.exercises) nameOf.set(e.id, e.name);
+  const byName = new Map();
+  for (const s of state.sessions) {
+    for (const [exId, en] of Object.entries(s.entries)) {
+      const name = nameOf.get(exId);
+      if (!name) continue;
+      const ws = en.sets.map((x) => x.w).filter((v) => v != null);
+      if (!ws.length) continue;
+      const key = norm(name);
+      if (!byName.has(key)) byName.set(key, { name, points: new Map() });
+      const pts = byName.get(key).points;
+      pts.set(s.date, Math.max(pts.get(s.date) ?? -Infinity, ...ws));
+    }
+  }
+  return byName;
+}
+
+function periodOf(iso, per) {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (per === 'ano') return { key: String(y), label: String(y) };
+  if (per === 'mes') return { key: iso.slice(0, 7), label: `${MESES[m - 1]}/${String(y).slice(2)}` };
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7)); // segunda-feira da semana
+  const k = dt.toISOString().slice(0, 10);
+  return { key: k, label: fmtDate(k) };
+}
+
+function seriesFor(points, per) {
+  const groups = new Map();
+  for (const [date, v] of [...points.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const p = periodOf(date, per);
+    const g = groups.get(p.key);
+    if (!g || v > g.v) groups.set(p.key, { ...p, v, date });
+  }
+  return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function niceTicks(min, max) {
+  if (min === max) { min -= 5; max += 5; }
+  const raw = (max - min) / 4;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((f) => f * mag).find((st) => st >= raw);
+  const lo = Math.floor(min / step) * step;
+  const hi = Math.ceil(max / step) * step;
+  const ticks = [];
+  for (let t = lo; t <= hi + step / 2; t += step) ticks.push(Math.round(t * 100) / 100);
+  return ticks;
+}
+
+function chartSVG(series, width) {
+  const H = 210, L = 44, R = 18, T = 22, B = 30;
+  const W = Math.max(280, width);
+  const vals = series.map((p) => p.v);
+  const ticks = niceTicks(Math.min(...vals), Math.max(...vals));
+  const y0 = ticks[0], y1 = ticks.at(-1);
+  const x = (i) => series.length === 1 ? (L + W - R) / 2 : L + (i * (W - L - R)) / (series.length - 1);
+  const y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+  const line = series.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join('');
+  const area = `${line}L${x(series.length - 1).toFixed(1)},${H - B}L${x(0).toFixed(1)},${H - B}Z`;
+  const every = Math.max(1, Math.ceil(series.length / Math.max(2, Math.floor((W - L - R) / 58))));
+  const xl = series.map((p, i) => (i % every === 0 || i === series.length - 1) && !(i !== series.length - 1 && series.length - 1 - i < every)
+    ? `<text x="${x(i).toFixed(1)}" y="${H - 10}" text-anchor="middle" class="eixo">${esc(p.label)}</text>` : '').join('');
+  const last = series.at(-1), li = series.length - 1;
+  // rótulo do último ponto fica do lado oposto ao da linha que chega nele
+  const below = series.length > 1 && series[li - 1].v > last.v;
+  return `
+    <svg class="grafico" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Carga máxima por período">
+      ${ticks.map((t) => `<line x1="${L}" x2="${W - R}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}" class="grade-l"/>
+        <text x="${L - 8}" y="${(y(t) + 4).toFixed(1)}" text-anchor="end" class="eixo">${kg(t)}</text>`).join('')}
+      ${series.length > 1 ? `<path d="${area}" class="area"/><path d="${line}" class="linha"/>` : ''}
+      ${series.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="${i === li ? 6 : 4.5}" class="ponto${i === li ? ' fim' : ''}"/>`).join('')}
+      <text x="${x(li).toFixed(1)}" y="${(below ? y(last.v) + 24 : y(last.v) - 14).toFixed(1)}" text-anchor="${series.length > 1 ? 'end' : 'middle'}" class="rotulo">${kg(last.v)} kg</text>
+      ${xl}
+      <g class="mira" hidden><line class="mira-l" y1="${T}" y2="${H - B}"/></g>
+      <rect class="toque" x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent"/>
+    </svg>
+    <div class="dica" role="status" hidden></div>`;
+}
+
+function renderEvolucao() {
+  const hist = weightHistory();
+  const options = [...hist.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name, 'pt-BR'));
+  if (!hist.has(evo.ex)) evo.ex = options[0]?.[0] || '';
+  const cur = hist.get(evo.ex);
+  const series = cur ? seriesFor(cur.points, evo.per) : [];
+  const per = { semana: 'Semana', mes: 'Mês', ano: 'Ano' };
+  const perWord = { semana: 'semana', mes: 'mês', ano: 'ano' }[evo.per];
+
+  let body;
+  if (!options.length) {
+    body = `<p class="vazio">Ainda não há pesos registrados. Depois do primeiro treino, a evolução de cada exercício aparece aqui.</p>`;
+  } else {
+    // início e atual: primeiro e último treino registrados, independente do período
+    const dates = [...cur.points.keys()].sort();
+    const first = { date: dates[0], v: cur.points.get(dates[0]) };
+    const last = { date: dates.at(-1), v: cur.points.get(dates.at(-1)) };
+    const diff = last.v - first.v;
+    const rel = first.v ? (diff / first.v) * 100 : 0;
+    const rows = series.map((p, i) => {
+      const prev = series[i - 1];
+      const d = prev ? p.v - prev.v : null;
+      const r = prev && prev.v ? (d / prev.v) * 100 : null;
+      const cls = d == null ? '' : d > 0 ? 'sobe' : d < 0 ? 'desce' : 'igual';
+      return `<tr><th scope="row">${esc(p.label)}</th><td class="num">${kg(p.v)} kg</td>
+        <td class="num var ${cls}">${d == null ? '<span class="nada">início</span>' : d === 0 ? 'mesma carga' : `${signed(d, kg)} kg · ${signed(r, pct)}%`}</td></tr>`;
+    }).reverse().join('');
+    body = `
+      <div class="resumo">
+        <div><span class="r-lbl">Início</span><span class="r-val">${kg(first.v)} kg</span><span class="r-sub">${fmtDateFull(first.date)}</span></div>
+        <div><span class="r-lbl">Atual</span><span class="r-val">${kg(last.v)} kg</span><span class="r-sub">${fmtDateFull(last.date)}</span></div>
+        <div class="r-dest"><span class="r-lbl">Evolução</span><span class="r-val">${diff === 0 ? '0 kg' : `${signed(diff, kg)} kg`}</span><span class="r-sub">${dates.length > 1 ? `${signed(rel, pct)}%` : 'um registro só'}</span></div>
+      </div>
+      <figure class="fig">
+        <figcaption class="eyebrow">Carga máxima por ${perWord}</figcaption>
+        <div class="fig-area" id="fig"></div>
+      </figure>
+      <div class="tabela-wrap">
+        <table class="tabela">
+          <thead><tr><th scope="col">${per[evo.per]}</th><th scope="col" class="num">Carga máx.</th><th scope="col" class="num">Variação</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  app.innerHTML = `
+    <section class="pagina evolucao">
+      ${pageHeader('evolucao')}
+      ${options.length ? `
+      <div class="filtros">
+        <label class="field"><span>Exercício</span>
+          <select id="evo-ex">${options.map(([k, v]) => `<option value="${esc(k)}"${k === evo.ex ? ' selected' : ''}>${esc(v.name)}</option>`).join('')}</select></label>
+        <div class="seg" role="group" aria-label="Período">
+          ${Object.entries(per).map(([k, l]) => `<button data-action="evo-per" data-per="${k}" aria-pressed="${k === evo.per}">${l}</button>`).join('')}
+        </div>
+      </div>` : ''}
+      ${body}
     </section>`;
+
+  const fig = document.getElementById('fig');
+  if (fig && series.length) drawChart(fig, series);
+}
+
+function drawChart(fig, series) {
+  fig.innerHTML = chartSVG(series, fig.clientWidth || 340);
+  const svg = fig.querySelector('svg');
+  const tip = fig.querySelector('.dica');
+  const mira = svg.querySelector('.mira');
+  const pts = [...svg.querySelectorAll('.ponto')];
+  const show = (ev) => {
+    const box = svg.getBoundingClientRect();
+    const px = ev.clientX - box.left;
+    let best = 0;
+    pts.forEach((c, i) => { if (Math.abs(+c.getAttribute('cx') - px) < Math.abs(+pts[best].getAttribute('cx') - px)) best = i; });
+    const p = series[best], c = pts[best];
+    const cx = +c.getAttribute('cx');
+    mira.hidden = false;
+    mira.querySelector('line').setAttribute('x1', cx);
+    mira.querySelector('line').setAttribute('x2', cx);
+    pts.forEach((el, i) => el.classList.toggle('ativo', i === best));
+    tip.hidden = false;
+    tip.innerHTML = `<strong>${kg(p.v)} kg</strong><span>${fmtDateFull(p.date)}</span>`;
+    const left = Math.min(Math.max(cx - tip.offsetWidth / 2, 0), box.width - tip.offsetWidth);
+    tip.style.left = left + 'px';
+    tip.style.top = Math.max(0, +c.getAttribute('cy') - tip.offsetHeight - 14) + 'px';
+  };
+  const hide = () => { mira.hidden = true; tip.hidden = true; pts.forEach((el) => el.classList.remove('ativo')); };
+  svg.addEventListener('pointerdown', show);
+  svg.addEventListener('pointermove', show);
+  svg.addEventListener('pointerleave', hide);
 }
 
 function renderTreino(w) {
@@ -484,6 +678,7 @@ function route() {
     return { name: 'indice' };
   }
   if (h === 'indice') return { name: 'indice' };
+  if (h === 'evolucao') return { name: 'evolucao' };
   return { name: 'capa' };
 }
 
@@ -495,6 +690,7 @@ function render({ keepScroll = false } = {}) {
   document.body.dataset.view = r.name;
   if (r.name === 'treino') renderTreino(r.w);
   else if (r.name === 'indice') renderIndice();
+  else if (r.name === 'evolucao') renderEvolucao();
   else renderCapa();
 
   const g = document.getElementById('grade');
@@ -521,6 +717,8 @@ const actions = {
   entrar: () => loginFlow(),
   'criar-conta': () => signupFlow(),
   conta: () => accountFlow(),
+  evolucao: () => go('evolucao'),
+  'evo-per'(el) { evo.per = el.dataset.per; saveEvo(); render({ keepScroll: true }); },
   sair: () => logoutFlow(),
   capa: () => go(''),
   indice: () => go('indice'),
@@ -671,6 +869,15 @@ app.addEventListener('click', (e) => {
   if (!el || el.disabled) return;
   const r = route();
   actions[el.dataset.action]?.(el, r.w);
+});
+
+app.addEventListener('change', (e) => {
+  if (e.target.id === 'evo-ex') { evo.ex = e.target.value; saveEvo(); render({ keepScroll: true }); }
+});
+
+window.addEventListener('resize', () => {
+  clearTimeout(window.__rz);
+  window.__rz = setTimeout(() => { if (route().name === 'evolucao') render({ keepScroll: true }); }, 200);
 });
 
 app.addEventListener('input', (e) => {

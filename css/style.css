@@ -453,3 +453,86 @@ button:disabled { opacity: .3; cursor: default; }
   letter-spacing: 0; text-transform: none;
   color: var(--dust);
 }
+
+/* ---------- abas ---------- */
+.abas { display: flex; gap: 0; border-bottom: 1px solid var(--line); }
+.aba {
+  padding: 12px 18px 12px 0;
+  margin-bottom: -1px;
+  background: none; border: 0;
+  border-bottom: 2px solid transparent;
+  font: 700 18px/1 var(--f-display);
+  letter-spacing: .12em; text-transform: uppercase;
+  color: var(--dust);
+}
+.aba + .aba { padding-left: 18px; }
+.aba[aria-current="page"] { color: var(--chalk); border-bottom-color: var(--chalk); }
+
+/* ---------- evolução ---------- */
+.filtros { display: grid; gap: 12px; }
+.field select {
+  height: 48px; padding: 0 12px;
+  background: var(--slab);
+  border: 1px solid var(--line-2);
+  border-radius: 2px;
+  font: 500 18px/1 var(--f-body);
+  color: var(--chalk);
+  appearance: none; -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--dust) 50%), linear-gradient(135deg, var(--dust) 50%, transparent 50%);
+  background-position: calc(100% - 20px) 21px, calc(100% - 15px) 21px;
+  background-size: 5px 5px; background-repeat: no-repeat;
+}
+.field select:focus { border-color: var(--chalk); outline: none; }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line-2); border-radius: 2px; }
+.seg button {
+  min-height: 42px;
+  background: transparent; border: 0;
+  font: 700 16px/1 var(--f-display);
+  letter-spacing: .12em; text-transform: uppercase;
+  color: var(--dust);
+}
+.seg button + button { border-left: 1px solid var(--line-2); }
+.seg button[aria-pressed="true"] { background: var(--chalk); color: var(--bg); }
+
+.resumo { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid var(--line); }
+.resumo > div { display: grid; gap: 6px; padding: 14px 10px 14px 0; min-width: 0; }
+.resumo > div + div { padding-left: 12px; border-left: 1px solid var(--line); }
+.r-lbl { font: 500 11px/1 var(--f-body); letter-spacing: .16em; text-transform: uppercase; color: var(--dust); }
+.r-val { font: 800 30px/1 var(--f-display); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.r-sub { font: 400 12px/1.2 var(--f-data); color: var(--dust); }
+.r-dest .r-val { color: var(--chalk); }
+
+.fig { margin: 0; display: grid; gap: 10px; }
+.fig-area { position: relative; min-width: 0; }
+.grafico { display: block; max-width: 100%; height: auto; overflow: visible; touch-action: pan-y; }
+.grafico .grade-l { stroke: var(--line); stroke-width: 1; }
+.grafico .eixo { fill: var(--dust); font: 400 11px var(--f-data); }
+.grafico .linha { fill: none; stroke: var(--chalk); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.grafico .area { fill: var(--chalk); opacity: .07; }
+.grafico .ponto { fill: var(--chalk); stroke: var(--bg); stroke-width: 2; }
+.grafico .ponto.fim { fill: var(--chalk); }
+.grafico .ponto.ativo { r: 7; }
+.grafico .rotulo { fill: var(--chalk); font: 500 13px var(--f-data); }
+.grafico .mira-l { stroke: var(--dust); stroke-width: 1; stroke-dasharray: 3 3; }
+.dica {
+  position: absolute; pointer-events: none;
+  display: grid; gap: 4px;
+  padding: 8px 10px;
+  background: var(--chalk); color: var(--bg);
+  border-radius: 2px;
+  white-space: nowrap;
+}
+.dica strong { font: 800 18px/1 var(--f-display); }
+.dica span { font: 400 12px/1 var(--f-data); }
+
+.tabela-wrap { overflow-x: auto; }
+.tabela { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.tabela th, .tabela td { padding: 12px 0; border-bottom: 1px solid var(--line); text-align: left; }
+.tabela thead th { font: 500 11px/1 var(--f-body); letter-spacing: .16em; text-transform: uppercase; color: var(--dust); }
+.tabela tbody th { font: 600 16px/1 var(--f-body); text-transform: lowercase; }
+.tabela .num { text-align: right; font: 400 15px/1 var(--f-data); }
+.tabela thead .num { font: 500 11px/1 var(--f-body); }
+.tabela td + td, .tabela th + th { padding-left: 12px; }
+.var.sobe { color: var(--chalk); }
+.var.desce { color: var(--oxide); }
+.var.igual { color: var(--dust); }
