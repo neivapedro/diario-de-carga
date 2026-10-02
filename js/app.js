@@ -374,7 +374,7 @@ const signed = (n, f) => (n > 0 ? '+' : n < 0 ? '−' : '') + f(Math.abs(n));
 // maior peso de cada exercício (pelo nome) em cada data
 function weightHistory() {
   const nameOf = new Map();
-  for (const w of state.workouts) for (const e of w.exercises) nameOf.set(e.id, e.name);
+  for (const w of state.workouts) for (const e of [...(w.removed || []), ...w.exercises]) nameOf.set(e.id, e.name);
   const byName = new Map();
   for (const s of state.sessions) {
     for (const [exId, en] of Object.entries(s.entries)) {
@@ -784,9 +784,11 @@ const actions = {
 
   async 'ex-remove'(el, w) {
     const e = w.exercises.find((x) => x.id === el.dataset.id);
-    const ok = await confirmSheet(`Remover ${e.name}?`, 'O exercício sai da ficha. As anotações antigas dele deixam de aparecer.', 'Remover');
+    const ok = await confirmSheet(`Remover ${e.name}?`, 'O exercício sai da ficha. As anotações antigas continuam guardadas e seguem aparecendo na aba Evolução.', 'Remover');
     if (!ok) return;
     w.exercises = w.exercises.filter((x) => x.id !== e.id);
+    // guarda o nome para a evolução continuar reconhecendo o histórico
+    w.removed = [...(w.removed || []).filter((x) => x.id !== e.id), { id: e.id, name: e.name }];
     commit();
     render({ keepScroll: true });
   },
