@@ -366,7 +366,7 @@ button:disabled { opacity: .3; cursor: default; }
 .obs.dia .lbl { line-height: 1.15; }
 .obs.dia td, .obs.dia th { border-bottom-color: var(--line-2); }
 
-.is-editing .now-head .col-n { color: var(--oxide); }
+.is-active .now-head .col-n { color: var(--chalk); }
 
 /* barra salvar */
 .barra {
@@ -427,3 +427,29 @@ button:disabled { opacity: .3; cursor: default; }
 
 @keyframes sobe { from { transform: translateY(24px); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .sheet { animation: none; } }
+
+/* iniciar / finalizar treino */
+.barra .in-start {
+  flex: 0 0 auto;
+  min-height: 54px;
+  padding: 0 12px;
+  background: var(--slab);
+  border: 1px solid var(--line-2);
+  border-radius: 2px;
+  font: 400 16px/1 var(--f-data);
+  color: var(--chalk);
+}
+.barra .in-start:focus { border-color: var(--chalk); outline: none; }
+.now-head .col-d { display: block; }
+.salvo {
+  display: block; min-height: 14px; margin-top: 6px;
+  font: 500 11px/1 var(--f-body);
+  letter-spacing: .14em; text-transform: uppercase;
+  color: var(--dust);
+}
+.ex-meta {
+  display: block; margin-top: 6px;
+  font: 400 13px/1 var(--f-data);
+  letter-spacing: 0; text-transform: none;
+  color: var(--dust);
+}

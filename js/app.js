@@ -210,10 +210,18 @@ function exerciseSheet(current) {
   });
 }
 
-/* ---------- rascunho da sessão ---------- */
+/* ---------- treino em andamento ---------- */
+// O treino só ganha coluna depois de "Iniciar treino". O que é digitado
+// é salvo sozinho na sessão daquela data; sem nenhuma série preenchida,
+// a sessão não existe (nada de coluna vazia).
 
-function isDraftEmpty(d) {
-  return !d.note && Object.values(d.ex).every((e) => !e.note && e.sets.every((s) => !s.w && !s.r));
+let startDate = null; // data escolhida no rodapé antes de iniciar
+
+function loadActive(w) {
+  draftFor = w.id;
+  const d = store.loadDraft(w.id);
+  draft = d && d.active ? d : null;
+  if (draft) syncDraft(w);
 }
 
 function syncDraft(w) {
@@ -222,26 +230,21 @@ function syncDraft(w) {
   }
 }
 
-function loadNewDraft(w) {
-  draft = store.loadDraft(w.id) || { date: todayISO(), note: '', editing: null, ex: {} };
-  draft.editing = null;
-  if (isDraftEmpty(draft)) draft.date = todayISO();
-  draftFor = w.id;
-  syncDraft(w);
-}
-
 function persistDraft() {
-  if (draft && !draft.editing) store.saveDraft(draftFor, draft);
+  if (draft) store.saveDraft(draftFor, draft);
 }
 
-function startEditing(w, s) {
-  persistDraft();
-  draft = { date: s.date, note: s.note || '', editing: s.id, ex: {} };
+function startSession(w, date) {
+  const s = state.sessions.find((x) => x.workoutId === w.id && x.date === date);
+  draft = { active: true, date, sessionId: s?.id || null, note: s?.note || '', ex: {} };
   for (const e of w.exercises) {
-    const en = s.entries[e.id];
+    const en = s?.entries[e.id];
     const sets = en ? en.sets.map((x) => ({ w: fmtNum(x.w), r: fmtNum(x.r) })) : [];
-    draft.ex[e.id] = { sets: sets.length ? sets : blankSets(e.sets), note: en?.note || '' };
+    while (sets.length < e.sets) sets.push({ w: '', r: '' });
+    draft.ex[e.id] = { sets, note: en?.note || '' };
   }
+  draftFor = w.id;
+  persistDraft();
 }
 
 function draftEntries(w) {
@@ -257,6 +260,37 @@ function draftEntries(w) {
     if (sets.length) filled = true;
   }
   return { entries, filled };
+}
+
+// grava o que está na coluna em andamento
+function autosave(w) {
+  clearTimeout(autosave.t);
+  if (!draft || draftFor !== w.id) return;
+  const { entries, filled } = draftEntries(w);
+  let s = draft.sessionId && state.sessions.find((x) => x.id === draft.sessionId);
+  if (!s) s = state.sessions.find((x) => x.workoutId === w.id && x.date === draft.date);
+  if (!filled) {
+    if (s) state.sessions = state.sessions.filter((x) => x.id !== s.id);
+    draft.sessionId = null;
+  } else if (s) {
+    // mantém anotações de exercícios que saíram da ficha
+    const kept = Object.fromEntries(Object.entries(s.entries).filter(([id]) => !w.exercises.some((e) => e.id === id)));
+    Object.assign(s, { note: draft.note.trim(), entries: { ...kept, ...entries } });
+    draft.sessionId = s.id;
+  } else {
+    s = { id: uid(), workoutId: w.id, date: draft.date, note: draft.note.trim(), entries, createdAt: Date.now() };
+    state.sessions.push(s);
+    draft.sessionId = s.id;
+  }
+  persistDraft();
+  commit();
+  const el = document.getElementById('salvo');
+  if (el) el.textContent = filled ? 'salvo' : '';
+}
+
+function scheduleAutosave(w) {
+  clearTimeout(autosave.t);
+  autosave.t = setTimeout(() => autosave(w), 400);
 }
 
 /* ---------- telas ---------- */
@@ -318,15 +352,17 @@ function renderIndice() {
 }
 
 function renderTreino(w) {
-  if (draftFor !== w.id || !draft) loadNewDraft(w);
-  syncDraft(w);
+  if (draftFor !== w.id) loadActive(w);
+  if (draft) syncDraft(w);
 
   const all = sessionsOf(w.id);
-  const past = all.filter((s) => s.id !== draft.editing);
+  const past = all.filter((s) => !draft || s.id !== draft.sessionId);
   const nCols = past.length;
-  const editing = !!draft.editing;
+  const active = !!draft;
   const today = todayISO();
-  const nowLabel = editing ? 'Editando' : draft.date === today ? 'Hoje' : 'Novo';
+  const nowLabel = active ? (draft.date === today ? 'Hoje' : 'Editando') : '';
+  const extra = active ? 1 : 0;
+  const hasGrid = active || nCols > 0;
 
   const pastHead = past.map((s) => `
     <th scope="col" class="col"><button class="col-btn" data-action="session" data-id="${s.id}">
@@ -336,11 +372,11 @@ function renderTreino(w) {
   const pastNotes = past.map((s) => `<td class="obs-txt">${s.note ? esc(s.note) : '<span class="nada">—</span>'}</td>`).join('');
 
   const exBlocks = w.exercises.map((e, idx) => {
-    const de = draft.ex[e.id];
-    const rows = Math.max(de.sets.length, ...past.map((s) => s.entries[e.id]?.sets.length || 0));
+    const de = active ? draft.ex[e.id] : null;
+    const rows = Math.max(de ? de.sets.length : (nCols ? 0 : e.sets), ...past.map((s) => s.entries[e.id]?.sets.length || 0), 1);
     let html = `
-      <tr class="ex-head"><th colspan="${nCols + 2}" scope="rowgroup"><div class="ex-nome">
-        <span>${esc(e.name)}</span>
+      <tr class="ex-head"><th colspan="${nCols + 1 + extra}" scope="rowgroup"><div class="ex-nome">
+        <span>${esc(e.name)}${hasGrid ? '' : `<span class="ex-meta">${e.sets} ${e.sets === 1 ? 'série' : 'séries'}</span>`}</span>
         ${editMode ? `<span class="ex-ctl">
           <button class="mini" data-action="ex-up" data-id="${e.id}" ${idx === 0 ? 'disabled' : ''} aria-label="Subir">↑</button>
           <button class="mini" data-action="ex-down" data-id="${e.id}" ${idx === w.exercises.length - 1 ? 'disabled' : ''} aria-label="Descer">↓</button>
@@ -349,6 +385,7 @@ function renderTreino(w) {
         </span>` : ''}
       </div></th></tr>`;
 
+    if (!hasGrid) return html;
     for (let i = 0; i < rows; i++) {
       const cells = past.map((s) => {
         const set = s.entries[e.id]?.sets[i];
@@ -357,31 +394,34 @@ function renderTreino(w) {
         const wTxt = set.w != null ? `${fmtNum(set.w)}<span class="u">kg</span>` : '';
         return `<td class="v">${rTxt}${rTxt && wTxt ? '<span class="x">×</span>' : ''}${wTxt}</td>`;
       }).join('');
-      const ds = de.sets[i];
+      const ds = de?.sets[i];
       const now = ds ? `
         <div class="par">
           <input class="in-r" data-ex="${e.id}" data-i="${i}" data-k="r" inputmode="numeric" enterkeyhint="next" placeholder="rep" aria-label="${esc(e.name)}, série ${i + 1}, repetições" value="${esc(ds.r)}">
           <span class="x">×</span>
           <input class="in-w" data-ex="${e.id}" data-i="${i}" data-k="w" inputmode="decimal" enterkeyhint="next" placeholder="kg" aria-label="${esc(e.name)}, série ${i + 1}, peso em kg" value="${esc(ds.w)}">
         </div>` : '';
-      html += `<tr><th scope="row" class="lbl">Série ${i + 1}</th>${cells}<td class="now">${now}</td></tr>`;
+      html += `<tr><th scope="row" class="lbl">Série ${i + 1}</th>${cells}${active ? `<td class="now">${now}</td>` : ''}</tr>`;
     }
 
-    html += `
+    if (active) html += `
       <tr class="ctl"><th class="lbl"></th>${nCols ? `<td colspan="${nCols}"></td>` : ''}
         <td class="now"><div class="series-ctl">
           <button class="mini" data-action="set-minus" data-id="${e.id}" ${de.sets.length <= 1 ? 'disabled' : ''} aria-label="Remover série">−</button>
           <span>série</span>
           <button class="mini" data-action="set-plus" data-id="${e.id}" aria-label="Adicionar série">+</button>
-        </div></td></tr>
+        </div></td></tr>`;
+    if (active || past.some((s) => s.entries[e.id]?.note)) html += `
       <tr class="obs"><th scope="row" class="lbl">Obs.</th>
         ${past.map((s) => { const n = s.entries[e.id]?.note; return `<td class="obs-txt">${n ? esc(n) : '<span class="nada">—</span>'}</td>`; }).join('')}
-        <td class="now"><input class="in-obs" data-ex="${e.id}" data-k="note" autocomplete="off" placeholder="anotar..." aria-label="Observação de ${esc(e.name)}" value="${esc(de.note)}"></td></tr>`;
+        ${active ? `<td class="now"><input class="in-obs" data-ex="${e.id}" data-k="note" autocomplete="off" placeholder="anotar..." aria-label="Observação de ${esc(e.name)}" value="${esc(de.note)}"></td>` : ''}</tr>`;
     return html;
   }).join('');
 
+  if (!startDate) startDate = today;
+
   app.innerHTML = `
-    <section class="pagina treino ${editing ? 'is-editing' : ''}">
+    <section class="pagina treino ${active ? 'is-active' : ''}">
       <header class="topo">
         <button class="link" data-action="indice">‹ Índice</button>
         <button class="link" data-action="toggle-edit">${editMode ? 'Concluir' : 'Editar ficha'}</button>
@@ -399,21 +439,23 @@ function renderTreino(w) {
       </div>` : ''}
 
       ${w.exercises.length ? `
+      ${!hasGrid ? '<p class="vazio">Nenhum treino registrado ainda. Escolha a data e toque em Iniciar treino.</p>' : ''}
       <div class="grade-wrap" id="grade">
         <table class="grade">
-          <thead>
+          ${hasGrid ? `<thead>
             <tr>
               <th class="lbl canto" scope="col"></th>
               ${pastHead}
-              <th scope="col" class="now now-head">
+              ${active ? `<th scope="col" class="now now-head">
                 <span class="col-n">${nowLabel}</span>
-                <input type="date" class="in-date" data-k="date" value="${draft.date}" max="${today}" aria-label="Data do treino">
-              </th>
+                <span class="col-d">${fmtDateFull(draft.date)}</span>
+                <span class="salvo" id="salvo">${draft.sessionId ? 'salvo' : ''}</span>
+              </th>` : ''}
             </tr>
-          </thead>
+          </thead>` : ''}
           <tbody>
-            <tr class="obs dia"><th scope="row" class="lbl">Obs. do dia</th>${pastNotes}
-              <td class="now"><input class="in-obs" data-k="day-note" autocomplete="off" placeholder="ex.: gripado" aria-label="Observação do dia" value="${esc(draft.note)}"></td></tr>
+            ${active || past.some((s) => s.note) ? `<tr class="obs dia"><th scope="row" class="lbl">Obs. do dia</th>${pastNotes}
+              ${active ? `<td class="now"><input class="in-obs" data-k="day-note" autocomplete="off" placeholder="ex.: gripado" aria-label="Observação do dia" value="${esc(draft.note)}"></td>` : ''}</tr>` : ''}
             ${exBlocks}
           </tbody>
         </table>
@@ -424,10 +466,10 @@ function renderTreino(w) {
     </section>
     ${w.exercises.length ? `
     <div class="barra">
-      ${editing ? `
-        <button class="btn" data-action="edit-cancel">Cancelar</button>
-        <button class="btn forte" data-action="save">Salvar alterações</button>` : `
-        <button class="btn forte" data-action="save">Salvar treino</button>`}
+      ${active ? `
+        <button class="btn forte" data-action="finish">${draft.date === today ? 'Finalizar treino' : 'Concluir edição'}</button>` : `
+        <input type="date" class="in-start" id="start-date" value="${startDate}" max="${today}" aria-label="Data do treino">
+        <button class="btn forte" data-action="start">Iniciar treino</button>`}
     </div>` : ''}`;
 }
 
@@ -526,7 +568,7 @@ const actions = {
     const e = { id: uid(), name: r.name, sets: 4 };
     w.exercises.push(e);
     rememberName(r.name);
-    draft.ex[e.id] = { sets: blankSets(e.sets), note: '' };
+    if (draft) draft.ex[e.id] = { sets: blankSets(e.sets), note: '' };
     commit();
     persistDraft();
     render({ keepScroll: true });
@@ -560,6 +602,7 @@ const actions = {
   async session(el, w) {
     const s = state.sessions.find((x) => x.id === el.dataset.id);
     const n = sessionsOf(w.id).indexOf(s) + 1;
+    if (draft) return toast('Finalize o treino em andamento antes de editar outro.');
     const r = await sheet({
       title: `Treino ${n} · ${fmtDateFull(s.date)}`,
       actions: [
@@ -569,7 +612,7 @@ const actions = {
       ],
     });
     if (r?.action === 'edit') {
-      startEditing(w, s);
+      startSession(w, s.date);
       render();
     } else if (r?.action === 'delete') {
       const ok = await confirmSheet(`Excluir treino ${n}?`, `As anotações de ${fmtDateFull(s.date)} serão apagadas. Não dá para desfazer.`, 'Excluir');
@@ -581,34 +624,23 @@ const actions = {
     }
   },
 
-  'edit-cancel'(_, w) {
-    loadNewDraft(w);
+  start(_, w) {
+    const date = document.getElementById('start-date')?.value || todayISO();
+    startDate = date;
+    const exists = state.sessions.some((x) => x.workoutId === w.id && x.date === date);
+    startSession(w, date);
     render();
+    toast(exists ? `Continuando o treino de ${fmtDateFull(date)}` : 'Treino iniciado. Tudo é salvo sozinho.');
   },
 
-  save(_, w) {
-    const { entries, filled } = draftEntries(w);
-    if (!filled) return toast('Preencha ao menos uma série antes de salvar.');
-    if (draft.editing) {
-      const s = state.sessions.find((x) => x.id === draft.editing);
-      // mantém anotações de exercícios que saíram da ficha
-      const kept = Object.fromEntries(Object.entries(s.entries).filter(([id]) => !w.exercises.some((e) => e.id === id)));
-      Object.assign(s, { date: draft.date, note: draft.note.trim(), entries: { ...kept, ...entries }, createdAt: Date.now() });
-      mergeSameDay();
-      commit();
-      loadNewDraft(w);
-      render();
-      toast('Alterações salvas');
-    } else {
-      state.sessions.push({ id: uid(), workoutId: w.id, date: draft.date, note: draft.note.trim(), entries, createdAt: Date.now() });
-      mergeSameDay();
-      commit();
-      store.clearDraft(w.id);
-      draft = null;
-      loadNewDraft(w);
-      render();
-      toast('Treino salvo');
-    }
+  finish(_, w) {
+    autosave(w);
+    const saved = !!draft.sessionId;
+    store.clearDraft(w.id);
+    draft = null;
+    startDate = null;
+    render();
+    toast(saved ? 'Treino salvo' : 'Nada preenchido. Nenhum treino foi registrado.');
   },
 };
 
@@ -625,12 +657,12 @@ function changeSets(w, id, delta) {
   const de = draft.ex[id];
   if (delta > 0) de.sets.push({ w: '', r: '' });
   else if (de.sets.length > 1) de.sets.pop();
-  if (!draft.editing) {
+  const last = sessionsOf(w.id).at(-1);
+  if (!last || last.date <= draft.date) {
     const e = w.exercises.find((x) => x.id === id);
-    e.sets = de.sets.length; // a próxima sessão já abre com essa quantidade
-    commit();
+    e.sets = de.sets.length; // o próximo treino já abre com essa quantidade
   }
-  persistDraft();
+  autosave(w);
   render({ keepScroll: true });
 }
 
@@ -643,16 +675,23 @@ app.addEventListener('click', (e) => {
 
 app.addEventListener('input', (e) => {
   const t = e.target;
+  if (t.id === 'start-date') { startDate = t.value || todayISO(); return; }
   if (!draft || !t.dataset.k) return;
   const k = t.dataset.k;
-  if (k === 'date') { if (t.value) draft.date = t.value; }
-  else if (k === 'day-note') draft.note = t.value;
+  if (k === 'day-note') draft.note = t.value;
   else if (k === 'note') draft.ex[t.dataset.ex].note = t.value;
   else draft.ex[t.dataset.ex].sets[+t.dataset.i][k] = t.value;
   persistDraft();
+  const w = route().w;
+  if (w) scheduleAutosave(w);
 });
 
-// "próximo" do teclado: peso -> repetições -> próxima série
+// garante o salvamento ao sair do app ou do campo
+const flush = () => { const w = route().w; if (w && draft && autosave.t) autosave(w); };
+app.addEventListener('focusout', flush);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+
+// "próximo" do teclado: repetições -> peso -> próxima série
 app.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter' || !e.target.matches('.in-w, .in-r')) return;
   e.preventDefault();
